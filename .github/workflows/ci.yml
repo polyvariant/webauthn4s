@@ -55,12 +55,9 @@ jobs:
         if: matrix.java == 'temurin@11' && steps.setup-java-temurin-11.outputs.cache-hit == 'false'
         run: sbt +update
 
-      - name: Set up system OpenSSL for Native
-        if: matrix.project == 'rootNative'
-        run: |
-          sudo apt-get update && sudo apt-get install -y libssl-dev
-          printf '%s\n' 'openssl_conf = openssl_init' '[openssl_init]' 'providers = provider_sect' '[provider_sect]' 'default = default_sect' '[default_sect]' 'activate = 1' > "$RUNNER_TEMP/openssl.cnf"
-          echo "OPENSSL_CONF=$RUNNER_TEMP/openssl.cnf" >> "$GITHUB_ENV"
+      - name: Install brew formulae (ubuntu)
+        if: (matrix.project == 'rootNative') && startsWith(matrix.os, 'ubuntu')
+        run: /home/linuxbrew/.linuxbrew/bin/brew install glibc openssl
 
       - name: Check that workflows are up to date
         run: sbt githubWorkflowCheck

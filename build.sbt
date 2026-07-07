@@ -17,29 +17,16 @@ ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 ThisBuild / mergifyStewardConfig ~= (_.map(_.withMergeMinors(true)))
 
-// The Native ES256/HMAC bindings link OpenSSL's libcrypto, and fs2's Native
-// HMAC goes through OpenSSL's legacy `EVP_get_digestbyname`, which returns null
-// on Ubuntu's OpenSSL 3 unless the default provider is activated — so every
-// hashing test fails with "EVP_get_digestbyname: null". We stay on the system
-// OpenSSL (matching the system glibc — brew's is built against a newer glibc and
-// won't link/run here) and instead install its headers and point OPENSSL_CONF at
-// a config that activates the default provider.
-ThisBuild / githubWorkflowBuildPreamble += WorkflowStep.Run(
-  name = Some("Set up system OpenSSL for Native"),
-  cond = Some("matrix.project == 'rootNative'"),
-  commands = List(
-    "sudo apt-get update && sudo apt-get install -y libssl-dev",
-    "printf '%s\\n' " +
-      "'openssl_conf = openssl_init' " +
-      "'[openssl_init]' " +
-      "'providers = provider_sect' " +
-      "'[provider_sect]' " +
-      "'default = default_sect' " +
-      "'[default_sect]' " +
-      "'activate = 1' > \"$RUNNER_TEMP/openssl.cnf\"",
-    "echo \"OPENSSL_CONF=$RUNNER_TEMP/openssl.cnf\" >> \"$GITHUB_ENV\"",
-  ),
-)
+// The Native ES256/HMAC bindings link OpenSSL's libcrypto, and fs2's Native HMAC
+// goes through OpenSSL's legacy `EVP_get_digestbyname`, which returns null on
+// Ubuntu's system OpenSSL 3 — so we install a working OpenSSL from brew instead.
+// brew's OpenSSL is built against brew's newer glibc, so we install brew's glibc
+// alongside it and let the binary both LINK and RUN against brew's glibc (the
+// brew config plugin sets -L<brew>/lib and LD_LIBRARY_PATH consistently). The
+// earlier failures came from mixing brew OpenSSL with the *system* glibc; keeping
+// everything on brew's glibc avoids the version skew.
+ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
+ThisBuild / nativeBrewInstallCond := Some("matrix.project == 'rootNative'")
 
 val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -62,6 +49,12 @@ lazy val webauthn4s = crossProject(JVMPlatform, NativePlatform)
   .settings(
     name := "webauthn4s",
     commonSettings,
+  )
+  .nativeConfigure(_.enablePlugins(ScalaNativeBrewedConfigPlugin))
+  .nativeSettings(
+    // Install brew's OpenSSL and its glibc; the binary links and runs against
+    // brew's glibc consistently (see the preamble note above).
+    nativeBrewFormulas ++= Set("openssl", "glibc")
   )
 
 lazy val root = tlCrossRootProject.aggregate(webauthn4s)
