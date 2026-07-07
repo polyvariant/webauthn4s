@@ -31,7 +31,9 @@ class ChallengeTest extends munit.CatsEffectSuite {
   private val ttl: FiniteDuration = 60.seconds
 
   private def challenge(secret: ByteVector = defaultSecret): IO[Challenge[IO]] =
-    SecureRandom.javaSecuritySecureRandom[IO].map(Challenge[IO](_, secret, ttl))
+    for {
+      given SecureRandom[IO] <- SecureRandom.javaSecuritySecureRandom[IO]
+    } yield Challenge[IO](secret, ttl)
 
   test("issue then validate round-trips, returning the raw challenge bytes") {
     for {

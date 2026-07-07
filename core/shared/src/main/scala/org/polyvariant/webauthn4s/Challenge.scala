@@ -57,18 +57,16 @@ object Challenge {
     */
   final case class Token(challenge: String, exp: FiniteDuration, mac: String)
 
-  /** Build a [[Challenge]] over a fixed secret, random source, and TTL.
+  /** Build a [[Challenge]] over a fixed secret and TTL, using an ambient `SecureRandom[F]` as the
+    * source of challenge bytes.
     *
-    * @param random
-    *   source of the 32 random challenge bytes.
     * @param secret
     *   the HMAC key; only its holder can forge a valid token.
     * @param ttl
     *   how long the browser has to complete `navigator.credentials.get()` and round-trip to the
     *   verify endpoint.
     */
-  def apply[F[_]: Hashing: MonadCancelThrow](
-    random: SecureRandom[F],
+  def apply[F[_]: Hashing: MonadCancelThrow: SecureRandom](
     secret: ByteVector,
     ttl: FiniteDuration,
   ): Challenge[F] =
@@ -76,7 +74,7 @@ object Challenge {
 
       def issue(now: FiniteDuration): F[Token] =
         for {
-          raw <- random.nextBytes(32).map(ByteVector(_))
+          raw <- SecureRandom[F].nextBytes(32).map(ByteVector(_))
           exp = now + ttl
           macBytes <- Hmac.sha256(secret, macMessage(raw, exp))
         } yield Token(challenge = b64(raw), exp = exp, mac = b64(macBytes))
