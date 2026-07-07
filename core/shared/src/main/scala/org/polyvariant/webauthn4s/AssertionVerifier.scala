@@ -17,7 +17,6 @@
 package org.polyvariant.webauthn4s
 
 import fs2.Chunk
-import fs2.hashing.HashAlgorithm
 import fs2.hashing.Hashing
 import scodec.bits.ByteVector
 
@@ -85,7 +84,7 @@ object AssertionVerifier {
       Left(ifFalse)
 
   private def sha256(data: ByteVector): ByteVector =
-    ByteVector(Hashing.hashChunk(HashAlgorithm.SHA256, Chunk.byteVector(data)).bytes.toArray)
+    ByteVector(Hashing.hashChunk(Sha256Platform.algorithm, Chunk.byteVector(data)).bytes.toArray)
 
   private def base64UrlNoPad(bytes: ByteVector): String =
     bytes.toBase64(scodec.bits.Bases.Alphabets.Base64UrlNoPad)

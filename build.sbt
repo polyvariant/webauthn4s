@@ -17,16 +17,15 @@ ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 ThisBuild / mergifyStewardConfig ~= (_.map(_.withMergeMinors(true)))
 
-// The Native ES256/HMAC bindings link OpenSSL's libcrypto, and fs2's Native HMAC
-// goes through OpenSSL's legacy `EVP_get_digestbyname`, which returns null on
-// Ubuntu's system OpenSSL 3 — so we install a working OpenSSL from brew instead.
-// brew's OpenSSL is built against brew's newer glibc, so we install brew's glibc
-// alongside it and let the binary both LINK and RUN against brew's glibc (the
-// brew config plugin sets -L<brew>/lib and LD_LIBRARY_PATH consistently). The
-// earlier failures came from mixing brew OpenSSL with the *system* glibc; keeping
-// everything on brew's glibc avoids the version skew.
-ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
-ThisBuild / nativeBrewInstallCond := Some("matrix.project == 'rootNative'")
+// The Native ES256 FFI and fs2's Native hashing link the system OpenSSL
+// (`-lcrypto`); the runner only lacks the dev headers/symlink. The old
+// "EVP_get_digestbyname: null" failure was a digest-name issue (see
+// Sha256Platform on Native), not a broken system OpenSSL — no brew needed.
+ThisBuild / githubWorkflowBuildPreamble += WorkflowStep.Run(
+  name = Some("Install OpenSSL headers for Native"),
+  cond = Some("matrix.project == 'rootNative'"),
+  commands = List("sudo apt-get update && sudo apt-get install -y libssl-dev"),
+)
 
 val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -50,11 +49,25 @@ lazy val webauthn4s = crossProject(JVMPlatform, NativePlatform)
     name := "webauthn4s",
     commonSettings,
   )
-  .nativeConfigure(_.enablePlugins(ScalaNativeBrewedConfigPlugin))
   .nativeSettings(
-    // Install brew's OpenSSL and its glibc; the binary links and runs against
-    // brew's glibc consistently (see the preamble note above).
-    nativeBrewFormulas ++= Set("openssl", "glibc")
+    // macOS ships no libcrypto to link against. Locally, either the toolchain
+    // provides one (nix devshell via clang's NIX_LDFLAGS, or LIBRARY_PATH), or
+    // we fall back to brew's OpenSSL if installed. On Linux, `-lcrypto`
+    // resolves against the system OpenSSL (libssl-dev) directly.
+    nativeConfig := {
+      val prev = nativeConfig.value
+      val brewOpenssl =
+        if (scala.util.Properties.isMac)
+          scala
+            .util
+            .Try(scala.sys.process.Process(List("brew", "--prefix", "openssl")).!!.trim)
+            .toOption
+            .filter(prefix => java.nio.file.Files.isDirectory(java.nio.file.Paths.get(prefix)))
+        else
+          None
+      brewOpenssl
+        .fold(prev)(prefix => prev.withLinkingOptions(prev.linkingOptions :+ s"-L$prefix/lib"))
+    }
   )
 
 lazy val root = tlCrossRootProject.aggregate(webauthn4s)

@@ -19,7 +19,6 @@ package org.polyvariant.webauthn4s
 import cats.effect.MonadCancelThrow
 import cats.syntax.all.*
 import fs2.Chunk
-import fs2.hashing.HashAlgorithm
 import fs2.hashing.Hashing
 import scodec.bits.ByteVector
 
@@ -37,7 +36,7 @@ object Hmac {
     message: ByteVector,
   ): F[ByteVector] =
     Hashing[F]
-      .hmac(HashAlgorithm.SHA256, Chunk.byteVector(secret))
+      .hmac(Sha256Platform.algorithm, Chunk.byteVector(secret))
       .use(hasher => hasher.update(Chunk.byteVector(message)) *> hasher.hash)
       .map(hash => ByteVector(hash.bytes.toArray))
 
