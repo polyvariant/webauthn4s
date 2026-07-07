@@ -17,6 +17,11 @@ ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 ThisBuild / mergifyStewardConfig ~= (_.map(_.withMergeMinors(true)))
 
+// True on the Linux CI runners, where we fetch OpenSSL from brew and have to
+// work around its glibc (see the Native settings below).
+lazy val isCiLinux: Boolean =
+  sys.env.contains("CI") && sys.props.getOrElse("os.name", "").toLowerCase.contains("linux")
+
 // The Native ES256/HMAC bindings link OpenSSL's libcrypto, and fs2's Native
 // HMAC goes through OpenSSL's `EVP_get_digestbyname`, which returns null on the
 // runner's system OpenSSL 3 (every hashing test fails). Install a compatible
@@ -50,19 +55,29 @@ lazy val webauthn4s = crossProject(JVMPlatform, NativePlatform)
   .nativeSettings(
     nativeBrewFormulas += "openssl",
     // On CI we install OpenSSL via brew (Ubuntu's system libcrypto returns null
-    // from EVP_get_digestbyname). But the brew config plugin also sets
-    // LD_LIBRARY_PATH to brew's lib dir at test time, which drags in brew's
-    // glibc and segfaults the binary at startup. Link libcrypto statically so
-    // the executable needs neither brew's .so nor its glibc at runtime.
+    // from EVP_get_digestbyname). Two problems follow, both fixed here for the
+    // CI/Linux case:
+    //
+    //  1. The brew config plugin sets LD_LIBRARY_PATH to brew's lib dir for the
+    //     test run, which drags in brew's glibc 2.39 and segfaults the binary at
+    //     startup (SIGSEGV before any test runs). We strip LD_LIBRARY_PATH from
+    //     the test env so the executable runs against the system glibc.
+    //  2. Without LD_LIBRARY_PATH the dynamic -lcrypto can't be found at runtime,
+    //     so we link libcrypto statically instead.
     nativeConfig := {
       val prev = nativeConfig.value
-      if (
-        sys.env.contains("CI") && sys.props.getOrElse("os.name", "").toLowerCase.contains("linux")
-      )
+      if (isCiLinux)
         prev.withLinkingOptions(
           prev.linkingOptions.filterNot(_ == "-lcrypto") ++
             Seq("-Wl,-Bstatic", "-lcrypto", "-Wl,-Bdynamic")
         )
+      else
+        prev
+    },
+    Test / envVars := {
+      val prev = (Test / envVars).value
+      if (isCiLinux)
+        prev - "LD_LIBRARY_PATH"
       else
         prev
     },
