@@ -17,17 +17,19 @@ ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 ThisBuild / mergifyStewardConfig ~= (_.map(_.withMergeMinors(true)))
 
-// True on the Linux CI runners, where we fetch OpenSSL from brew and have to
-// work around its glibc (see the Native settings below).
-lazy val isCiLinux: Boolean =
-  sys.env.contains("CI") && sys.props.getOrElse("os.name", "").toLowerCase.contains("linux")
-
 // The Native ES256/HMAC bindings link OpenSSL's libcrypto, and fs2's Native
 // HMAC goes through OpenSSL's `EVP_get_digestbyname`, which returns null on the
-// runner's system OpenSSL 3 (every hashing test fails). Install a compatible
-// OpenSSL via brew before the Native build — the same approach fs2 uses.
-ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
-ThisBuild / nativeBrewInstallCond := Some("matrix.project == 'rootNative'")
+// runner's system OpenSSL 3 (every hashing test then fails). Install a working
+// OpenSSL via brew before the Native build and export its prefix; the Native
+// project links libcrypto statically from there (see the nativeConfig below).
+ThisBuild / githubWorkflowBuildPreamble += WorkflowStep.Run(
+  name = Some("Install OpenSSL for Native"),
+  cond = Some("matrix.project == 'rootNative'"),
+  commands = List(
+    "/home/linuxbrew/.linuxbrew/bin/brew install openssl",
+    "echo \"WEBAUTHN4S_OPENSSL_PREFIX=$(/home/linuxbrew/.linuxbrew/bin/brew --prefix openssl)\" >> \"$GITHUB_ENV\"",
+  ),
+)
 
 val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -51,36 +53,27 @@ lazy val webauthn4s = crossProject(JVMPlatform, NativePlatform)
     name := "webauthn4s",
     commonSettings,
   )
-  .nativeConfigure(_.enablePlugins(ScalaNativeBrewedConfigPlugin))
   .nativeSettings(
-    nativeBrewFormulas += "openssl",
-    // On CI we install OpenSSL via brew (Ubuntu's system libcrypto returns null
-    // from EVP_get_digestbyname). Two problems follow, both fixed here for the
-    // CI/Linux case:
-    //
-    //  1. The brew config plugin sets LD_LIBRARY_PATH to brew's lib dir for the
-    //     test run, which drags in brew's glibc 2.39 and segfaults the binary at
-    //     startup (SIGSEGV before any test runs). We strip LD_LIBRARY_PATH from
-    //     the test env so the executable runs against the system glibc.
-    //  2. Without LD_LIBRARY_PATH the dynamic -lcrypto can't be found at runtime,
-    //     so we link libcrypto statically instead.
+    // Ubuntu's system libcrypto returns null from EVP_get_digestbyname (fs2's
+    // Native HMAC path), so on CI we install a working OpenSSL via brew (see the
+    // preamble step in `nativeCiBrewOpensslStep`). We must NOT use brew's broad
+    // `-L<brew>/lib` on the link line, though: that also links brew's glibc 2.39,
+    // and the binary then won't run against the runner's system glibc 2.35
+    // ("GLIBC_2.38 not found"). Instead point only at OpenSSL's own keg and link
+    // libcrypto *statically* by absolute path, so nothing from brew (glibc
+    // included) is needed at runtime.
     nativeConfig := {
       val prev = nativeConfig.value
-      if (isCiLinux)
-        prev.withLinkingOptions(
-          prev.linkingOptions.filterNot(_ == "-lcrypto") ++
-            Seq("-Wl,-Bstatic", "-lcrypto", "-Wl,-Bdynamic")
-        )
-      else
-        prev
-    },
-    Test / envVars := {
-      val prev = (Test / envVars).value
-      if (isCiLinux)
-        prev - "LD_LIBRARY_PATH"
-      else
-        prev
-    },
+      sys.env.get("WEBAUTHN4S_OPENSSL_PREFIX") match {
+        case Some(prefix) =>
+          prev
+            .withCompileOptions(prev.compileOptions :+ s"-I$prefix/include")
+            .withLinkingOptions(
+              prev.linkingOptions.filterNot(_ == "-lcrypto") :+ s"$prefix/lib/libcrypto.a"
+            )
+        case None => prev
+      }
+    }
   )
 
 lazy val root = tlCrossRootProject.aggregate(webauthn4s)
