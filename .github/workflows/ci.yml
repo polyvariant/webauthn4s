@@ -55,6 +55,10 @@ jobs:
         if: matrix.java == 'temurin@11' && steps.setup-java-temurin-11.outputs.cache-hit == 'false'
         run: sbt +update
 
+      - name: Install brew formulae (ubuntu)
+        if: (matrix.project == 'rootNative') && startsWith(matrix.os, 'ubuntu')
+        run: /home/linuxbrew/.linuxbrew/bin/brew install openssl
+
       - name: Check that workflows are up to date
         run: sbt githubWorkflowCheck
 

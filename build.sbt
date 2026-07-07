@@ -17,6 +17,13 @@ ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 ThisBuild / mergifyStewardConfig ~= (_.map(_.withMergeMinors(true)))
 
+// The Native ES256/HMAC bindings link OpenSSL's libcrypto, and fs2's Native
+// HMAC goes through OpenSSL's `EVP_get_digestbyname`, which returns null on the
+// runner's system OpenSSL 3 (every hashing test fails). Install a compatible
+// OpenSSL via brew before the Native build — the same approach fs2 uses.
+ThisBuild / githubWorkflowBuildPreamble ++= nativeBrewInstallWorkflowSteps.value
+ThisBuild / nativeBrewInstallCond := Some("matrix.project == 'rootNative'")
+
 val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-no-indent",
@@ -38,6 +45,10 @@ lazy val webauthn4s = crossProject(JVMPlatform, NativePlatform)
   .settings(
     name := "webauthn4s",
     commonSettings,
+  )
+  .nativeConfigure(_.enablePlugins(ScalaNativeBrewedConfigPlugin))
+  .nativeSettings(
+    nativeBrewFormulas += "openssl"
   )
 
 lazy val root = tlCrossRootProject.aggregate(webauthn4s)
