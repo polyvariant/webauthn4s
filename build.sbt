@@ -48,7 +48,24 @@ lazy val webauthn4s = crossProject(JVMPlatform, NativePlatform)
   )
   .nativeConfigure(_.enablePlugins(ScalaNativeBrewedConfigPlugin))
   .nativeSettings(
-    nativeBrewFormulas += "openssl"
+    nativeBrewFormulas += "openssl",
+    // On CI we install OpenSSL via brew (Ubuntu's system libcrypto returns null
+    // from EVP_get_digestbyname). But the brew config plugin also sets
+    // LD_LIBRARY_PATH to brew's lib dir at test time, which drags in brew's
+    // glibc and segfaults the binary at startup. Link libcrypto statically so
+    // the executable needs neither brew's .so nor its glibc at runtime.
+    nativeConfig := {
+      val prev = nativeConfig.value
+      if (
+        sys.env.contains("CI") && sys.props.getOrElse("os.name", "").toLowerCase.contains("linux")
+      )
+        prev.withLinkingOptions(
+          prev.linkingOptions.filterNot(_ == "-lcrypto") ++
+            Seq("-Wl,-Bstatic", "-lcrypto", "-Wl,-Bdynamic")
+        )
+      else
+        prev
+    },
   )
 
 lazy val root = tlCrossRootProject.aggregate(webauthn4s)
