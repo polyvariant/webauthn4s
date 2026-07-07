@@ -26,43 +26,44 @@ import scala.concurrent.duration.*
   */
 class ChallengeTest extends munit.CatsEffectSuite {
 
-  private val secret: ByteVector = ByteVector("super-secret-key".getBytes("UTF-8"))
+  private val defaultSecret: ByteVector = ByteVector("super-secret-key".getBytes("UTF-8"))
   private val now: FiniteDuration = 1_700_000_000_000L.millis
   private val ttl: FiniteDuration = 60.seconds
 
-  private val random: IO[SecureRandom[IO]] = SecureRandom.javaSecuritySecureRandom[IO]
+  private def challenge(secret: ByteVector = defaultSecret): IO[Challenge[IO]] =
+    SecureRandom.javaSecuritySecureRandom[IO].map(Challenge[IO](_, secret, ttl))
 
   test("issue then validate round-trips, returning the raw challenge bytes") {
     for {
-      rng <- random
-      token <- Challenge.issue(rng, secret, now, ttl)
-      result <- Challenge.validate[IO](secret, token, now + 1.second)
+      c <- challenge()
+      token <- c.issue(now)
+      result <- c.validate(token, now + 1.second)
       raw = ByteVector.fromValidBase64(token.challenge, scodec.bits.Bases.Alphabets.Base64UrlNoPad)
     } yield assertEquals(result, Right(raw))
   }
 
   test("rejects a tampered mac") {
     for {
-      rng <- random
-      token <- Challenge.issue(rng, secret, now, ttl)
+      c <- challenge()
+      token <- c.issue(now)
       bad = token.copy(mac = flipLastB64(token.mac))
-      result <- Challenge.validate[IO](secret, bad, now + 1.second)
+      result <- c.validate(bad, now + 1.second)
     } yield assertEquals(result, Left("challenge mac mismatch"))
   }
 
   test("rejects a wrong secret") {
     for {
-      rng <- random
-      token <- Challenge.issue(rng, secret, now, ttl)
-      result <- Challenge.validate[IO](ByteVector("other".getBytes("UTF-8")), token, now + 1.second)
+      token <- challenge().flatMap(_.issue(now))
+      other <- challenge(ByteVector("other".getBytes("UTF-8")))
+      result <- other.validate(token, now + 1.second)
     } yield assertEquals(result, Left("challenge mac mismatch"))
   }
 
   test("rejects an expired challenge") {
     for {
-      rng <- random
-      token <- Challenge.issue(rng, secret, now, ttl)
-      result <- Challenge.validate[IO](secret, token, token.exp)
+      c <- challenge()
+      token <- c.issue(now)
+      result <- c.validate(token, token.exp)
     } yield assertEquals(result, Left("challenge expired"))
   }
 

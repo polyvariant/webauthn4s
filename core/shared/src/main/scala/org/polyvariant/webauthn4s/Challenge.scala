@@ -24,22 +24,84 @@ import scodec.bits.ByteVector
 
 import scala.concurrent.duration.FiniteDuration
 
-/** Stateless WebAuthn challenge.
+/** Stateless WebAuthn challenge issuer/validator.
   *
-  * No server-side challenge store: the issued token is `challenge ‖ exp` plus an HMAC binding them
-  * under a session secret. Anyone can read the challenge, but only the server can forge a valid
-  * `mac`, and the `exp` bounds replay. This survives serverless container churn for free — there's
-  * nothing to persist.
+  * No server-side challenge store: an issued token is `challenge ‖ exp` plus an HMAC binding them
+  * under a session secret. Anyone can read the challenge, but only the holder of `secret` can forge
+  * a valid `mac`, and `exp` bounds replay. This survives serverless container churn for free —
+  * there's nothing to persist.
   *
-  * Polymorphic in `F`; the caller supplies the `SecureRandom[F]` and the wall-clock reading (`now`,
-  * as time since the epoch), so this stays referentially transparent and easy to test.
+  * Construct one with [[Challenge.apply]] and pass it around, rather than threading the secret,
+  * random source, and TTL through call sites. The caller still supplies each `now` reading (time
+  * since the epoch), keeping this referentially transparent and easy to test.
   */
+trait Challenge[F[_]] {
+
+  /** Issue a fresh challenge valid until `now + ttl`. Hand the returned token to the client. */
+  def issue(now: FiniteDuration): F[Challenge.Token]
+
+  /** Recompute the mac, constant-time compare it, and check expiry against `now`.
+    *
+    * @return
+    *   the raw challenge bytes (for the assertion check) on success, else a `Left` naming the
+    *   failure.
+    */
+  def validate(token: Challenge.Token, now: FiniteDuration): F[Either[String, ByteVector]]
+
+}
+
 object Challenge {
 
   /** A challenge handed to the client, echoed back verbatim on verify. The base64url (no padding)
     * encodings match what a JSON API typically carries. `exp` is time since the epoch.
     */
   final case class Token(challenge: String, exp: FiniteDuration, mac: String)
+
+  /** Build a [[Challenge]] over a fixed secret, random source, and TTL.
+    *
+    * @param random
+    *   source of the 32 random challenge bytes.
+    * @param secret
+    *   the HMAC key; only its holder can forge a valid token.
+    * @param ttl
+    *   how long the browser has to complete `navigator.credentials.get()` and round-trip to the
+    *   verify endpoint.
+    */
+  def apply[F[_]: Hashing: MonadCancelThrow](
+    random: SecureRandom[F],
+    secret: ByteVector,
+    ttl: FiniteDuration,
+  ): Challenge[F] =
+    new Challenge[F] {
+
+      def issue(now: FiniteDuration): F[Token] =
+        for {
+          raw <- random.nextBytes(32).map(ByteVector(_))
+          exp = now + ttl
+          macBytes <- Hmac.sha256(secret, macMessage(raw, exp))
+        } yield Token(challenge = b64(raw), exp = exp, mac = b64(macBytes))
+
+      def validate(token: Token, now: FiniteDuration): F[Either[String, ByteVector]] =
+        ByteVector.fromBase64(token.challenge, Alphabet) match {
+          case None      => Left("challenge not base64url").pure[F].widen
+          case Some(raw) =>
+            ByteVector.fromBase64(token.mac, Alphabet) match {
+              case None               => Left("mac not base64url").pure[F].widen
+              case Some(presentedMac) =>
+                Hmac.sha256(secret, macMessage(raw, token.exp)).map { expectedMac =>
+                  if (!Hmac.constantTimeEquals(expectedMac, presentedMac))
+                    Left("challenge mac mismatch")
+                  else if (now >= token.exp)
+                    Left("challenge expired")
+                  else
+                    Right(raw)
+                }
+            }
+        }
+
+    }
+
+  private val Alphabet = scodec.bits.Bases.Alphabets.Base64UrlNoPad
 
   /** Bytes the mac is computed over: `challenge ‖ ascii(expMillis)`. Encoding `exp` as its decimal
     * ASCII milliseconds keeps issue/validate trivially in sync.
@@ -48,58 +110,6 @@ object Challenge {
     challenge ++ ByteVector(exp.toMillis.toString.getBytes("UTF-8"))
 
   private def b64(bytes: ByteVector): String =
-    bytes.toBase64(scodec.bits.Bases.Alphabets.Base64UrlNoPad)
-
-  /** Issue a fresh challenge valid until `now + ttl`.
-    *
-    * @param random
-    *   source of the 32 random challenge bytes, supplied by the caller.
-    * @param now
-    *   current time since the epoch.
-    * @param ttl
-    *   how long the browser has to complete `navigator.credentials.get()` and round-trip to the
-    *   verify endpoint.
-    */
-  def issue[F[_]: Hashing: MonadCancelThrow](
-    random: SecureRandom[F],
-    secret: ByteVector,
-    now: FiniteDuration,
-    ttl: FiniteDuration,
-  ): F[Token] =
-    for {
-      raw <- random.nextBytes(32).map(ByteVector(_))
-      exp = now + ttl
-      macBytes <- Hmac.sha256(secret, macMessage(raw, exp))
-    } yield Token(challenge = b64(raw), exp = exp, mac = b64(macBytes))
-
-  /** Recompute the mac, constant-time compare it, and check expiry.
-    *
-    * @param now
-    *   current time since the epoch.
-    * @return
-    *   the raw challenge bytes (for the assertion check) on success, else a `Left` naming the
-    *   failure.
-    */
-  def validate[F[_]: Hashing: MonadCancelThrow](
-    secret: ByteVector,
-    token: Token,
-    now: FiniteDuration,
-  ): F[Either[String, ByteVector]] =
-    ByteVector.fromBase64(token.challenge, scodec.bits.Bases.Alphabets.Base64UrlNoPad) match {
-      case None      => Left("challenge not base64url").pure[F].widen
-      case Some(raw) =>
-        ByteVector.fromBase64(token.mac, scodec.bits.Bases.Alphabets.Base64UrlNoPad) match {
-          case None               => Left("mac not base64url").pure[F].widen
-          case Some(presentedMac) =>
-            Hmac.sha256(secret, macMessage(raw, token.exp)).map { expectedMac =>
-              if (!Hmac.constantTimeEquals(expectedMac, presentedMac))
-                Left("challenge mac mismatch")
-              else if (now >= token.exp)
-                Left("challenge expired")
-              else
-                Right(raw)
-            }
-        }
-    }
+    bytes.toBase64(Alphabet)
 
 }

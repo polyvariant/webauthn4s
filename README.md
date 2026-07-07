@@ -50,9 +50,9 @@ AssertionVerifier.verify(expected, assertion) match {
 }
 ```
 
-Stateless challenges. The library is `F[_]`-polymorphic: you supply the `SecureRandom[F]`
-and the current time (as a `FiniteDuration` since the epoch), so it stays referentially
-transparent.
+Stateless challenges. The library is `F[_]`-polymorphic: you build a `Challenge[F]` over a
+fixed secret, `SecureRandom[F]`, and TTL, then pass it around. You supply the current time
+(as a `FiniteDuration` since the epoch) per call, so it stays referentially transparent.
 
 ```scala
 import cats.effect.IO
@@ -61,11 +61,12 @@ import org.polyvariant.webauthn4s.Challenge
 import scala.concurrent.duration.*
 
 for {
-  random <- SecureRandom.javaSecuritySecureRandom[IO]
-  now    <- IO.realTime                                          // FiniteDuration since epoch
-  token  <- Challenge.issue(random, secret, now, ttl = 60.seconds) // hand `token` to the client
+  random    <- SecureRandom.javaSecuritySecureRandom[IO]
+  challenge  = Challenge[IO](random, secret, ttl = 60.seconds)  // hold & pass this around
+  now       <- IO.realTime                                      // FiniteDuration since epoch
+  token     <- challenge.issue(now)                             // hand `token` to the client
   // ...later, on verify:
-  raw    <- Challenge.validate[IO](secret, token, now)          // Either[String, ByteVector]
+  raw       <- challenge.validate(token, now)                   // Either[String, ByteVector]
 } yield raw
 ```
 
