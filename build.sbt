@@ -11,6 +11,7 @@ ThisBuild / githubWorkflowPublishTargetBranches := Seq(
 )
 
 ThisBuild / scalaVersion := "3.3.8"
+ThisBuild / tlJdkRelease := Some(11)
 ThisBuild / tlFatalWarnings := false
 ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
