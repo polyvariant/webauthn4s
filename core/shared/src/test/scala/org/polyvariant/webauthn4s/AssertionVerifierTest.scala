@@ -86,6 +86,29 @@ class AssertionVerifierTest extends munit.FunSuite {
     )
   }
 
+  private def withClientData(json: String): Assertion =
+    assertion.copy(clientDataJson = ByteVector(json.getBytes("UTF-8")))
+
+  test("rejects clientDataJSON with a missing field instead of throwing") {
+    List(
+      "challenge" -> """{"type":"webauthn.get","origin":"https://signal.example"}""",
+      "origin" -> """{"type":"webauthn.get","challenge":"AQIDBAUGBwgJCgsMDQ4PEA"}""",
+      "type" -> """{"challenge":"AQIDBAUGBwgJCgsMDQ4PEA","origin":"https://signal.example"}""",
+    ).foreach { (field, json) =>
+      val result = AssertionVerifier.verify(expected, withClientData(json))
+      assert(
+        result.left.exists(_.contains(s"missing required field: $field")),
+        s"$field: $result",
+      )
+    }
+  }
+
+  test("rejects non-object clientDataJSON instead of throwing") {
+    List("null", "[]", "\"x\"", "").foreach { json =>
+      assert(AssertionVerifier.verify(expected, withClientData(json)).isLeft, json)
+    }
+  }
+
   // Multi-device: a backend can accept an assertion if it verifies against ANY
   // trusted SPKI. Model that "any" fold here against a key list with one
   // matching key among decoys.

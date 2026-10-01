@@ -33,7 +33,7 @@ final case class ClientData(`type`: String, challenge: String, origin: String)
 object ClientData {
 
   /** Hand-written reader (no macros): tolerant of unknown/extra fields, which WebAuthn explicitly
-    * allows and requires us to ignore.
+    * allows and requires us to ignore. `type`, `challenge` and `origin` are required.
     */
   given JsonValueCodec[ClientData] =
     new JsonValueCodec[ClientData] {
@@ -59,6 +59,13 @@ object ClientData {
           }
         } else
           in.readNullOrTokenError(default, '{')
+        // Absent fields would otherwise surface as nulls and blow up downstream checks.
+        if (typ == null)
+          in.decodeError("missing required field: type")
+        if (challenge == null)
+          in.decodeError("missing required field: challenge")
+        if (origin == null)
+          in.decodeError("missing required field: origin")
         ClientData(typ, challenge, origin)
       }
 
