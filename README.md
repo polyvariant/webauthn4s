@@ -64,14 +64,17 @@ import scala.concurrent.duration.*
 
 for {
   given SecureRandom[IO] <- SecureRandom.javaSecuritySecureRandom[IO]
-  given ReplayGuard[IO]  <- ReplayGuard.inMemory[IO]  // single process only, see below
-  challenge = Challenge[IO](secret, ttl = 60.seconds)  // hold & pass this around
-  now      <- IO.realTime                              // FiniteDuration since epoch
-  token    <- challenge.issue(now)                     // hand `token` to the client
+  given ReplayGuard[IO]  <- ReplayGuard.inMemory[IO]              // single process only, see below
+  challenge              <- Challenge[IO](secret, ttl = 60.seconds) // hold & pass this around
+  now                    <- IO.realTime                             // FiniteDuration since epoch
+  token                  <- challenge.issue(now)                    // hand `token` to the client
   // ...later, on verify:
-  raw      <- challenge.validate(token, now)            // Either[String, ByteVector]
+  raw                    <- challenge.validate(token, now)          // Either[String, ByteVector]
 } yield raw
 ```
+
+`secret` must be at least 32 random bytes (e.g. `openssl rand -base64 32`, loaded from your
+secret store); `Challenge.apply` fails with an `IllegalArgumentException` otherwise.
 
 ### User verification
 

@@ -26,7 +26,7 @@ import scala.concurrent.duration.*
   */
 class ChallengeTest extends munit.CatsEffectSuite {
 
-  private val defaultSecret: ByteVector = ByteVector("super-secret-key".getBytes("UTF-8"))
+  private val defaultSecret: ByteVector = ByteVector.fill(32)(0x2a)
   private val now: FiniteDuration = 1_700_000_000_000L.millis
   private val ttl: FiniteDuration = 60.seconds
 
@@ -34,7 +34,8 @@ class ChallengeTest extends munit.CatsEffectSuite {
     for {
       given SecureRandom[IO] <- SecureRandom.javaSecuritySecureRandom[IO]
       given ReplayGuard[IO] <- ReplayGuard.inMemory[IO]
-    } yield Challenge[IO](secret, ttl)
+      c <- Challenge[IO](secret, ttl)
+    } yield c
 
   test("issue then validate round-trips, returning the raw challenge bytes") {
     for {
@@ -43,6 +44,12 @@ class ChallengeTest extends munit.CatsEffectSuite {
       result <- c.validate(token, now + 1.second)
       raw = ByteVector.fromValidBase64(token.challenge, scodec.bits.Bases.Alphabets.Base64UrlNoPad)
     } yield assertEquals(result, Right(raw))
+  }
+
+  test("refuses a secret shorter than 32 bytes") {
+    challenge(ByteVector.fill(31)(0x2a)).attempt.map { result =>
+      assert(result.left.exists(_.isInstanceOf[IllegalArgumentException]), result)
+    }
   }
 
   test("rejects a tampered mac") {
@@ -57,7 +64,7 @@ class ChallengeTest extends munit.CatsEffectSuite {
   test("rejects a wrong secret") {
     for {
       token <- challenge().flatMap(_.issue(now))
-      other <- challenge(ByteVector("other".getBytes("UTF-8")))
+      other <- challenge(ByteVector.fill(32)(0x2b))
       result <- other.validate(token, now + 1.second)
     } yield assertEquals(result, Left("challenge mac mismatch"))
   }

@@ -62,12 +62,27 @@ object Challenge {
     * source of challenge bytes and an ambient [[ReplayGuard]] to enforce single use.
     *
     * @param secret
-    *   the HMAC key; only its holder can forge a valid token.
+    *   the HMAC key; only its holder can forge a valid token. Must be at least 32 bytes from a
+    *   CSPRNG (e.g. `openssl rand -base64 32`), otherwise this fails with an
+    *   `IllegalArgumentException`.
     * @param ttl
     *   how long the browser has to complete `navigator.credentials.get()` and round-trip to the
     *   verify endpoint.
     */
   def apply[F[_]: Hashing: MonadCancelThrow: SecureRandom: ReplayGuard](
+    secret: ByteVector,
+    ttl: FiniteDuration,
+  ): F[Challenge[F]] =
+    MonadCancelThrow[F]
+      .raiseError[Challenge[F]](
+        new IllegalArgumentException(
+          s"Challenge secret must be at least $MinSecretLength bytes, got ${secret.size}"
+        )
+      )
+      .whenA(secret.size < MinSecretLength)
+      .as(instance(secret, ttl))
+
+  private def instance[F[_]: Hashing: MonadCancelThrow: SecureRandom: ReplayGuard](
     secret: ByteVector,
     ttl: FiniteDuration,
   ): Challenge[F] =
@@ -108,6 +123,9 @@ object Challenge {
     }
 
   private val Alphabet = scodec.bits.Bases.Alphabets.Base64UrlNoPad
+
+  /** HMAC-SHA256 key floor: shorter keys reduce the forgery bound below the hash's 256 bits. */
+  private val MinSecretLength: Int = 32
 
   /** Size of an issued challenge; `validate` rejects anything else. */
   private val ChallengeLength: Int = 32
