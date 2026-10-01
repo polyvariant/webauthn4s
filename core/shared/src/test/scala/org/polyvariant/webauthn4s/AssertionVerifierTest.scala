@@ -172,6 +172,27 @@ class AssertionVerifierTest extends munit.FunSuite {
     }
   }
 
+  private val crossOriginClientData: String =
+    """{"type":"webauthn.get","challenge":"AQIDBAUGBwgJCgsMDQ4PEA","origin":"https://signal.example","crossOrigin":true}"""
+
+  test("rejects a cross-origin assertion by default") {
+    assertEquals(
+      AssertionVerifier.verify(expected, withClientData(crossOriginClientData)),
+      Left("cross-origin assertion not allowed"),
+    )
+  }
+
+  test("lets a cross-origin assertion through when allowed") {
+    // The body was edited, so the signature no longer matches — but the cross-origin check passed.
+    assertEquals(
+      AssertionVerifier.verify(
+        expected.copy(allowCrossOrigin = true),
+        withClientData(crossOriginClientData),
+      ),
+      Left("signature verification failed"),
+    )
+  }
+
   // Multi-device: a backend can accept an assertion if it verifies against ANY
   // trusted SPKI. Model that "any" fold here against a key list with one
   // matching key among decoys.

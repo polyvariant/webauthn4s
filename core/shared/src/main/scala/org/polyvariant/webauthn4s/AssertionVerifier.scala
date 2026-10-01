@@ -43,6 +43,11 @@ object AssertionVerifier {
     *   otherwise two copies of the credential may exist (a cloned authenticator). Many platform
     *   passkeys always report `0`, which passes; hardware security keys usually count up. Persist
     *   the returned [[AuthenticatorData.counter]] after each success.
+    * @param allowCrossOrigin
+    *   whether to accept assertions made inside a cross-origin iframe (`crossOrigin: true` in
+    *   `clientDataJSON`). Off by default: an embedding page could otherwise frame `origin` and
+    *   drive the ceremony. Enable only if you deliberately allow embedding via the
+    *   `publickey-credentials-get` permissions policy.
     */
   final case class Expectations(
     rpId: String,
@@ -50,6 +55,7 @@ object AssertionVerifier {
     publicKeySpki: ByteVector,
     requireUserVerification: Boolean = true,
     signCount: Long = 0L,
+    allowCrossOrigin: Boolean = false,
   )
 
   /** Raw assertion fields as received from the browser (already base64url-decoded into bytes;
@@ -71,6 +77,10 @@ object AssertionVerifier {
       clientData <- ClientData.parse(assertion.clientDataJson.toArray)
       _ <- check(clientData.`type` == "webauthn.get", s"unexpected type: ${clientData.`type`}")
       _ <- check(clientData.origin == expected.origin, s"origin mismatch: ${clientData.origin}")
+      _ <- check(
+        !clientData.crossOrigin || expected.allowCrossOrigin,
+        "cross-origin assertion not allowed",
+      )
       challengeB64 = base64UrlNoPad(assertion.challenge.bytes)
       _ <- check(
         constantTimeEquals(clientData.challenge, challengeB64),

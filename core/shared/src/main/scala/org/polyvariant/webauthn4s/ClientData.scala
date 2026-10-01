@@ -27,8 +27,16 @@ import com.github.plokhotnyuk.jsoniter_scala.core.*
   *   base64url (no padding) of the server-issued challenge.
   * @param origin
   *   the requesting origin, e.g. `"https://example.com"`.
+  * @param crossOrigin
+  *   whether the ceremony ran in an iframe whose origin differs from its ancestors'. `false` when
+  *   absent.
   */
-final case class ClientData(`type`: String, challenge: String, origin: String)
+final case class ClientData(
+  `type`: String,
+  challenge: String,
+  origin: String,
+  crossOrigin: Boolean,
+)
 
 object ClientData {
 
@@ -41,15 +49,17 @@ object ClientData {
         var typ: String = null
         var challenge: String = null
         var origin: String = null
+        var crossOrigin: Boolean = false
         if (in.isNextToken('{')) {
           if (!in.isNextToken('}')) {
             in.rollbackToken()
             while ({
               in.readKeyAsString() match {
-                case "type"      => typ = in.readString(null)
-                case "challenge" => challenge = in.readString(null)
-                case "origin"    => origin = in.readString(null)
-                case _           => in.skip()
+                case "type"        => typ = in.readString(null)
+                case "challenge"   => challenge = in.readString(null)
+                case "origin"      => origin = in.readString(null)
+                case "crossOrigin" => crossOrigin = in.readBoolean()
+                case _             => in.skip()
               }
               in.isNextToken(',')
             })
@@ -66,7 +76,7 @@ object ClientData {
           in.decodeError("missing required field: challenge")
         if (origin == null)
           in.decodeError("missing required field: origin")
-        ClientData(typ, challenge, origin)
+        ClientData(typ, challenge, origin, crossOrigin)
       }
 
       def encodeValue(x: ClientData, out: JsonWriter): Unit =

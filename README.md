@@ -13,8 +13,8 @@ state is a short-lived set of already-used challenges (see [Replay protection](#
 
 ## Scope
 
-- ✅ Assertion (authentication) verification: origin, rpId hash, user-present and
-  user-verified flags, challenge match, ES256 signature.
+- ✅ Assertion (authentication) verification: type, origin, cross-origin flag, challenge match,
+  rpId hash, user-present and user-verified flags, ES256 signature, signature counter.
 - ✅ Challenge issue/validate (HMAC-SHA256, TTL-bounded, single-use via a pluggable `ReplayGuard`).
 - ❌ Attestation (registration) verification — out of scope. Registration is expected to
   happen out-of-band: capture the credential's public key (SPKI) once and hand it to this
