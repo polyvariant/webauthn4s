@@ -45,8 +45,8 @@ val assertion = Assertion(
 )
 
 AssertionVerifier.verify(expected, assertion) match {
-  case Right(())    => // authenticated
-  case Left(reason) => // reject; `reason` names the first failing check
+  case Right(authData) => // authenticated; persist authData.counter as the next `signCount`
+  case Left(reason)    => // reject; `reason` names the first failing check
 }
 ```
 
@@ -92,6 +92,14 @@ Physical security keys: FIDO2 keys verify users via a PIN (or a fingerprint on b
 models); a key without a PIN set will usually make the browser prompt to create one. Legacy
 U2F-only keys can't verify users at all — if you must accept them, or this login is a second
 factor, set `requireUserVerification = false`.
+
+### Signature counter
+
+Pass the credential's stored counter as `Expectations.signCount`, and store
+`authData.counter` after each successful `verify`. If either value is nonzero, the new counter
+must be strictly greater, otherwise `verify` rejects with a possible-clone error. Hardware
+security keys typically keep a real counter, so this is how a cloned key gets noticed; many
+synced passkeys always report `0`, which passes.
 
 ### Replay protection
 

@@ -79,7 +79,7 @@ class AssertionVerifierTest extends munit.FunSuite {
   private def assertion: Assertion = Assertion(authData, clientDataJson, signature, challenge)
 
   test("accepts a valid assertion") {
-    assertEquals(AssertionVerifier.verify(expected, assertion), Right(()))
+    assertEquals(AssertionVerifier.verify(expected, assertion).map(_.counter), Right(7L))
   }
 
   private def upOnlyAssertion: Assertion =
@@ -94,12 +94,27 @@ class AssertionVerifierTest extends munit.FunSuite {
 
   test("accepts a user-present-only assertion when user verification is not required") {
     assertEquals(
-      AssertionVerifier.verify(
-        expected.copy(publicKeySpki = upOnlySpki, requireUserVerification = false),
-        upOnlyAssertion,
-      ),
-      Right(()),
+      AssertionVerifier
+        .verify(
+          expected.copy(publicKeySpki = upOnlySpki, requireUserVerification = false),
+          upOnlyAssertion,
+        )
+        .map(_.userVerified),
+      Right(false),
     )
+  }
+
+  test("accepts a sign count that increased") {
+    assert(AssertionVerifier.verify(expected.copy(signCount = 6L), assertion).isRight)
+  }
+
+  test("rejects a sign count that did not increase") {
+    List(7L, 8L).foreach { stored =>
+      assertEquals(
+        AssertionVerifier.verify(expected.copy(signCount = stored), assertion),
+        Left("sign count did not increase (possible cloned authenticator)"),
+      )
+    }
   }
 
   test("rejects a tampered signature") {
