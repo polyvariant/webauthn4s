@@ -13,8 +13,8 @@ state is a short-lived set of already-used challenges (see [Replay protection](#
 
 ## Scope
 
-- ✅ Assertion (authentication) verification: origin, rpId hash, user-present flag,
-  challenge match, ES256 signature.
+- ✅ Assertion (authentication) verification: origin, rpId hash, user-present and
+  user-verified flags, challenge match, ES256 signature.
 - ✅ Challenge issue/validate (HMAC-SHA256, TTL-bounded, single-use via a pluggable `ReplayGuard`).
 - ❌ Attestation (registration) verification — out of scope. Registration is expected to
   happen out-of-band: capture the credential's public key (SPKI) once and hand it to this
@@ -72,6 +72,19 @@ for {
   raw      <- challenge.validate(token, now)            // Either[String, ByteVector]
 } yield raw
 ```
+
+### User verification
+
+By default `verify` requires the authenticator's **user-verified (UV)** flag, not just
+user-present. UP alone is a touch: anyone holding a security key (or an unlocked phone) passes.
+UV means the authenticator checked a PIN, biometric or device unlock. Request it from the
+browser too, with `userVerification: "required"` in the `navigator.credentials.get()` options —
+the flags are signed, so the server-side check is what actually enforces it.
+
+Physical security keys: FIDO2 keys verify users via a PIN (or a fingerprint on biometric
+models); a key without a PIN set will usually make the browser prompt to create one. Legacy
+U2F-only keys can't verify users at all — if you must accept them, or this login is a second
+factor, set `requireUserVerification = false`.
 
 ### Replay protection
 

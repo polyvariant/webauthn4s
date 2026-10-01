@@ -21,27 +21,51 @@ import org.polyvariant.webauthn4s.AssertionVerifier.Expectations
 import scodec.bits.ByteVector
 import scodec.bits.hex
 
-/** Cross-platform (JVM + Native) test for the WebAuthn assertion verifier. The vector was
-  * synthesised once with `openssl` for rpId `signal.example`, origin `https://signal.example`,
-  * challenge `0102…10`, flags `0x01` (UP set), signing `authData ‖ SHA256(clientDataJSON)` with a
-  * fresh P-256 key.
+/** Cross-platform (JVM + Native) test for the WebAuthn assertion verifier. The vectors were
+  * synthesised with `openssl` for rpId `signal.example`, origin `https://signal.example`, challenge
+  * `0102…10`, signing `authData ‖ SHA256(clientDataJSON)` with a fresh P-256 key:
+  * {{{
+  *   openssl ecparam -name prime256v1 -genkey -noout -out k.pem
+  *   { printf 'signal.example' | openssl dgst -sha256 -binary; printf '\x05\x00\x00\x00\x07'; } > ad.bin
+  *   { cat ad.bin; openssl dgst -sha256 -binary cdj.bin; } > msg.bin
+  *   openssl dgst -sha256 -sign k.pem msg.bin > sig.bin
+  * }}}
+  * The main vector has flags `0x05` (UP + UV) and sign count 7; the `upOnly` one has flags `0x01`.
   */
 class AssertionVerifierTest extends munit.FunSuite {
 
   private val spki: ByteVector =
     ByteVector.fromValidBase64(
-      "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEztDtTh5D1mC8EZhpRn8rpform1ZWejrS04VllOGeMaoZx6VMN9B68zxH+KLb/xuRl+lytzYBc/FTgaEO0jyC1w=="
+      "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmbazkB7z9vt2+CRxu4jJoPcXW/aee78enJbfYaQOEZk7YnAztgqOfvUwV/+0D/Zkwuo0Htx4SXocaVS7HMraNw=="
     )
 
   private val authData: ByteVector =
-    ByteVector.fromValidBase64("6T21w6AQF/wJIWNdyUDkYKE9QSV19Wb6VPyON9JTNdYBAAAAAQ==")
+    ByteVector.fromValidBase64("6T21w6AQF/wJIWNdyUDkYKE9QSV19Wb6VPyON9JTNdYFAAAABw==")
 
   private val clientDataJson: ByteVector =
+    ByteVector.fromValidBase64(
+      "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQVFJREJBVUdCd2dKQ2dzTURRNFBFQSIsIm9yaWdpbiI6Imh0dHBzOi8vc2lnbmFsLmV4YW1wbGUiLCJjcm9zc09yaWdpbiI6ZmFsc2V9"
+    )
+
+  private val signature: ByteVector =
+    ByteVector.fromValidBase64(
+      "MEQCIEgepjpK4GwO48o3rXRdmbAnLja0ByaSvU2vzN0fbmdlAiBWOzWZ4lY6tyXaye7zyNJHn2iHTM5+Wz3Pi6o5U3/b7g=="
+    )
+
+  private val upOnlySpki: ByteVector =
+    ByteVector.fromValidBase64(
+      "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEztDtTh5D1mC8EZhpRn8rpform1ZWejrS04VllOGeMaoZx6VMN9B68zxH+KLb/xuRl+lytzYBc/FTgaEO0jyC1w=="
+    )
+
+  private val upOnlyAuthData: ByteVector =
+    ByteVector.fromValidBase64("6T21w6AQF/wJIWNdyUDkYKE9QSV19Wb6VPyON9JTNdYBAAAAAQ==")
+
+  private val upOnlyClientDataJson: ByteVector =
     ByteVector.fromValidBase64(
       "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQVFJREJBVUdCd2dKQ2dzTURRNFBFQSIsIm9yaWdpbiI6Imh0dHBzOi8vc2lnbmFsLmV4YW1wbGUifQ=="
     )
 
-  private val signature: ByteVector =
+  private val upOnlySignature: ByteVector =
     ByteVector.fromValidBase64(
       "MEQCIDMTFAKgJsWsNj83NHfco0QBedpzJwwkUW+nUg5rqIwnAiACbLRQ+fbPzPS/I1tJO40p8l85eAmmc/cwTsNk3VLvtQ=="
     )
@@ -55,6 +79,26 @@ class AssertionVerifierTest extends munit.FunSuite {
 
   test("accepts a valid assertion") {
     assertEquals(AssertionVerifier.verify(expected, assertion), Right(()))
+  }
+
+  private def upOnlyAssertion: Assertion =
+    Assertion(upOnlyAuthData, upOnlyClientDataJson, upOnlySignature, challenge)
+
+  test("rejects a user-present-only assertion by default") {
+    assertEquals(
+      AssertionVerifier.verify(expected.copy(publicKeySpki = upOnlySpki), upOnlyAssertion),
+      Left("user-verified flag not set"),
+    )
+  }
+
+  test("accepts a user-present-only assertion when user verification is not required") {
+    assertEquals(
+      AssertionVerifier.verify(
+        expected.copy(publicKeySpki = upOnlySpki, requireUserVerification = false),
+        upOnlyAssertion,
+      ),
+      Right(()),
+    )
   }
 
   test("rejects a tampered signature") {

@@ -29,11 +29,20 @@ import scodec.bits.ByteVector
   */
 object AssertionVerifier {
 
-  /** The expected relying-party context. */
+  /** The expected relying-party context.
+    *
+    * @param requireUserVerification
+    *   whether the authenticator must have verified the user (PIN, biometric, device unlock) — the
+    *   UV flag. Without it an assertion only proves possession: anyone holding an unlocked security
+    *   key can touch it and log in. Defaults to `true`, matching `userVerification: "required"` in
+    *   the `navigator.credentials.get()` options; set to `false` only for authenticators that can't
+    *   verify users (e.g. U2F-only keys) or when this is a second factor.
+    */
   final case class Expectations(
     rpId: String,
     origin: String,
     publicKeySpki: ByteVector,
+    requireUserVerification: Boolean = true,
   )
 
   /** Raw assertion fields as received from the browser (already base64url-decoded into bytes;
@@ -66,6 +75,10 @@ object AssertionVerifier {
         "rpIdHash mismatch",
       )
       _ <- check(authData.userPresent, "user-present flag not set")
+      _ <- check(
+        authData.userVerified || !expected.requireUserVerification,
+        "user-verified flag not set",
+      )
       signedMessage = assertion.authenticatorData ++ sha256(assertion.clientDataJson)
       _ <- check(
         Es256.verifySig(
