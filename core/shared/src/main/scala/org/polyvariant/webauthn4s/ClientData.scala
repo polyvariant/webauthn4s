@@ -86,7 +86,10 @@ object ClientData {
     }
 
   def parse(jsonBytes: Array[Byte]): Either[String, ClientData] =
-    try Right(readFromArray[ClientData](jsonBytes))
+    // No hex dump: the message would otherwise echo attacker-controlled bytes into logs.
+    try Right(
+        readFromArray[ClientData](jsonBytes, ReaderConfig.withAppendHexDumpToParseException(false))
+      )
     catch { case e: JsonReaderException => Left(s"clientDataJSON parse error: ${e.getMessage}") }
 
 }

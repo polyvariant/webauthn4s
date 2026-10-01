@@ -70,13 +70,14 @@ object AssertionVerifier {
 
   /** @return
     *   the parsed authenticator data (new sign count, UV/backup flags) if every WebAuthn assertion
-    *   check passes, else a `Left` naming the first failure. Never throws.
+    *   check passes, else a `Left` naming the first failure. Never throws. Failure messages never
+    *   include request content, so they are safe to log or return to the client.
     */
   def verify(expected: Expectations, assertion: Assertion): Either[String, AuthenticatorData] =
     for {
       clientData <- ClientData.parse(assertion.clientDataJson.toArray)
-      _ <- check(clientData.`type` == "webauthn.get", s"unexpected type: ${clientData.`type`}")
-      _ <- check(clientData.origin == expected.origin, s"origin mismatch: ${clientData.origin}")
+      _ <- check(clientData.`type` == "webauthn.get", "unexpected type")
+      _ <- check(clientData.origin == expected.origin, "origin mismatch")
       _ <- check(
         !clientData.crossOrigin || expected.allowCrossOrigin,
         "cross-origin assertion not allowed",

@@ -138,7 +138,7 @@ class AssertionVerifierTest extends munit.FunSuite {
   test("rejects a wrong origin") {
     assertEquals(
       AssertionVerifier.verify(expected.copy(origin = "https://evil.example"), assertion),
-      Left("origin mismatch: https://signal.example"),
+      Left("origin mismatch"),
     )
   }
 
@@ -162,6 +162,21 @@ class AssertionVerifierTest extends munit.FunSuite {
       assert(
         result.left.exists(_.contains(s"missing required field: $field")),
         s"$field: $result",
+      )
+    }
+  }
+
+  test("error messages don't echo request content") {
+    val evil = "evil\r\nINFO forged log line"
+    List(
+      s"""{"type":"$evil","challenge":"x","origin":"https://signal.example"}""",
+      s"""{"type":"webauthn.get","challenge":"x","origin":"$evil"}""",
+      s"""{"type":"webauthn.get","challenge":"x","origin":"https://signal.example",$evil}""",
+    ).foreach { json =>
+      val result = AssertionVerifier.verify(expected, withClientData(json))
+      assert(
+        result.left.exists(msg => !msg.contains("evil") && !msg.contains("65 76 69 6c")),
+        result,
       )
     }
   }
