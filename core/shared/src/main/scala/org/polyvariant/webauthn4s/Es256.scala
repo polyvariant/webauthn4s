@@ -16,6 +16,9 @@
 
 package org.polyvariant.webauthn4s
 
+import scodec.bits.ByteVector
+import scodec.bits.hex
+
 /** Verifies an ES256 (ECDSA P-256 + SHA-256) signature — the one crypto primitive WebAuthn
   * assertion verify needs.
   *
@@ -25,8 +28,10 @@ package org.polyvariant.webauthn4s
 object Es256 {
 
   /** @param publicKeySpki
-    *   DER-encoded SubjectPublicKeyInfo (X.509 SPKI) for the EC P-256 public key. JVM parses it via
-    *   `X509EncodedKeySpec`, Native via `d2i_PUBKEY` — identical input on both platforms.
+    *   DER-encoded SubjectPublicKeyInfo (X.509 SPKI) for the EC P-256 public key, uncompressed
+    *   point. Any other key (other curves, RSA, Ed25519, compressed points) is rejected up front:
+    *   the backends would otherwise verify some of them (JCA accepts any EC curve, OpenSSL any key
+    *   type), so neither platform alone enforces "ES256".
     * @param message
     *   the pre-hash signed bytes. SHA-256 is applied internally by the algorithm (for WebAuthn this
     *   is `authenticatorData ‖ SHA256(clientDataJSON)`).
@@ -37,6 +42,18 @@ object Es256 {
     *   true iff the signature is valid for (message, publicKey). Never throws.
     */
   def verifySig(publicKeySpki: Array[Byte], message: Array[Byte], signature: Array[Byte]): Boolean =
-    Es256Platform.verify(publicKeySpki, message, signature)
+    isP256Spki(publicKeySpki) && Es256Platform.verify(publicKeySpki, message, signature)
+
+  /** `SEQUENCE { SEQUENCE { id-ecPublicKey, prime256v1 }, BIT STRING { 0x04 ‖ x(32) ‖ y(32) } }` —
+    * a P-256 SPKI has exactly this DER header followed by the 64 coordinate bytes. Point validity
+    * is left to the backend's decoder.
+    */
+  private val P256SpkiHeader: ByteVector =
+    hex"3059301306072a8648ce3d020106082a8648ce3d03010703420004"
+
+  private val P256SpkiLength: Int = 91
+
+  private def isP256Spki(spki: Array[Byte]): Boolean =
+    spki.length == P256SpkiLength && ByteVector(spki).startsWith(P256SpkiHeader)
 
 }

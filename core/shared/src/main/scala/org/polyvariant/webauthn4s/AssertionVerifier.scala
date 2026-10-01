@@ -29,33 +29,60 @@ import scodec.bits.ByteVector
   */
 object AssertionVerifier {
 
-  /** The expected relying-party context. */
+  /** The expected relying-party context.
+    *
+    * @param requireUserVerification
+    *   whether the authenticator must have verified the user (PIN, biometric, device unlock) — the
+    *   UV flag. Without it an assertion only proves possession: anyone holding an unlocked security
+    *   key can touch it and log in. Defaults to `true`, matching `userVerification: "required"` in
+    *   the `navigator.credentials.get()` options; set to `false` only for authenticators that can't
+    *   verify users (e.g. U2F-only keys) or when this is a second factor.
+    * @param signCount
+    *   the signature counter stored for this credential after its last successful assertion (`0` if
+    *   none). If either it or the new counter is nonzero, the new one must be strictly greater —
+    *   otherwise two copies of the credential may exist (a cloned authenticator). Many platform
+    *   passkeys always report `0`, which passes; hardware security keys usually count up. Persist
+    *   the returned [[AuthenticatorData.counter]] after each success.
+    * @param allowCrossOrigin
+    *   whether to accept assertions made inside a cross-origin iframe (`crossOrigin: true` in
+    *   `clientDataJSON`). Off by default: an embedding page could otherwise frame `origin` and
+    *   drive the ceremony. Enable only if you deliberately allow embedding via the
+    *   `publickey-credentials-get` permissions policy.
+    */
   final case class Expectations(
     rpId: String,
     origin: String,
     publicKeySpki: ByteVector,
+    requireUserVerification: Boolean = true,
+    signCount: Long = 0L,
+    allowCrossOrigin: Boolean = false,
   )
 
   /** Raw assertion fields as received from the browser (already base64url-decoded into bytes;
-    * `challenge` is the server-issued value we handed out).
+    * `challenge` is the server-issued value we handed out, as returned by [[Challenge.validate]]).
     */
   final case class Assertion(
     authenticatorData: ByteVector,
     clientDataJson: ByteVector,
     signature: ByteVector,
-    challenge: ByteVector,
+    challenge: Challenge.Validated,
   )
 
   /** @return
-    *   `Right(())` if every WebAuthn assertion check passes, else a `Left` naming the first
-    *   failure. Never throws.
+    *   the parsed authenticator data (new sign count, UV/backup flags) if every WebAuthn assertion
+    *   check passes, else a `Left` naming the first failure. Never throws. Failure messages never
+    *   include request content, so they are safe to log or return to the client.
     */
-  def verify(expected: Expectations, assertion: Assertion): Either[String, Unit] =
+  def verify(expected: Expectations, assertion: Assertion): Either[String, AuthenticatorData] =
     for {
       clientData <- ClientData.parse(assertion.clientDataJson.toArray)
-      _ <- check(clientData.`type` == "webauthn.get", s"unexpected type: ${clientData.`type`}")
-      _ <- check(clientData.origin == expected.origin, s"origin mismatch: ${clientData.origin}")
-      challengeB64 = base64UrlNoPad(assertion.challenge)
+      _ <- check(clientData.`type` == "webauthn.get", "unexpected type")
+      _ <- check(clientData.origin == expected.origin, "origin mismatch")
+      _ <- check(
+        !clientData.crossOrigin || expected.allowCrossOrigin,
+        "cross-origin assertion not allowed",
+      )
+      challengeB64 = base64UrlNoPad(assertion.challenge.bytes)
       _ <- check(
         constantTimeEquals(clientData.challenge, challengeB64),
         "challenge mismatch",
@@ -66,6 +93,10 @@ object AssertionVerifier {
         "rpIdHash mismatch",
       )
       _ <- check(authData.userPresent, "user-present flag not set")
+      _ <- check(
+        authData.userVerified || !expected.requireUserVerification,
+        "user-verified flag not set",
+      )
       signedMessage = assertion.authenticatorData ++ sha256(assertion.clientDataJson)
       _ <- check(
         Es256.verifySig(
@@ -75,7 +106,11 @@ object AssertionVerifier {
         ),
         "signature verification failed",
       )
-    } yield ()
+      _ <- check(
+        (authData.counter == 0 && expected.signCount == 0) || authData.counter > expected.signCount,
+        "sign count did not increase (possible cloned authenticator)",
+      )
+    } yield authData
 
   private def check(cond: Boolean, ifFalse: => String): Either[String, Unit] =
     if (cond)

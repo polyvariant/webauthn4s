@@ -27,13 +27,21 @@ import com.github.plokhotnyuk.jsoniter_scala.core.*
   *   base64url (no padding) of the server-issued challenge.
   * @param origin
   *   the requesting origin, e.g. `"https://example.com"`.
+  * @param crossOrigin
+  *   whether the ceremony ran in an iframe whose origin differs from its ancestors'. `false` when
+  *   absent.
   */
-final case class ClientData(`type`: String, challenge: String, origin: String)
+final case class ClientData(
+  `type`: String,
+  challenge: String,
+  origin: String,
+  crossOrigin: Boolean,
+)
 
 object ClientData {
 
   /** Hand-written reader (no macros): tolerant of unknown/extra fields, which WebAuthn explicitly
-    * allows and requires us to ignore.
+    * allows and requires us to ignore. `type`, `challenge` and `origin` are required.
     */
   given JsonValueCodec[ClientData] =
     new JsonValueCodec[ClientData] {
@@ -41,15 +49,17 @@ object ClientData {
         var typ: String = null
         var challenge: String = null
         var origin: String = null
+        var crossOrigin: Boolean = false
         if (in.isNextToken('{')) {
           if (!in.isNextToken('}')) {
             in.rollbackToken()
             while ({
               in.readKeyAsString() match {
-                case "type"      => typ = in.readString(null)
-                case "challenge" => challenge = in.readString(null)
-                case "origin"    => origin = in.readString(null)
-                case _           => in.skip()
+                case "type"        => typ = in.readString(null)
+                case "challenge"   => challenge = in.readString(null)
+                case "origin"      => origin = in.readString(null)
+                case "crossOrigin" => crossOrigin = in.readBoolean()
+                case _             => in.skip()
               }
               in.isNextToken(',')
             })
@@ -59,7 +69,14 @@ object ClientData {
           }
         } else
           in.readNullOrTokenError(default, '{')
-        ClientData(typ, challenge, origin)
+        // Absent fields would otherwise surface as nulls and blow up downstream checks.
+        if (typ == null)
+          in.decodeError("missing required field: type")
+        if (challenge == null)
+          in.decodeError("missing required field: challenge")
+        if (origin == null)
+          in.decodeError("missing required field: origin")
+        ClientData(typ, challenge, origin, crossOrigin)
       }
 
       def encodeValue(x: ClientData, out: JsonWriter): Unit =
@@ -69,7 +86,10 @@ object ClientData {
     }
 
   def parse(jsonBytes: Array[Byte]): Either[String, ClientData] =
-    try Right(readFromArray[ClientData](jsonBytes))
+    // No hex dump: the message would otherwise echo attacker-controlled bytes into logs.
+    try Right(
+        readFromArray[ClientData](jsonBytes, ReaderConfig.withAppendHexDumpToParseException(false))
+      )
     catch { case e: JsonReaderException => Left(s"clientDataJSON parse error: ${e.getMessage}") }
 
 }
