@@ -18,7 +18,8 @@ state is a short-lived set of already-used challenges (see [Replay protection](#
 - ✅ Challenge issue/validate (HMAC-SHA256, TTL-bounded, single-use via a pluggable `ReplayGuard`).
 - ❌ Attestation (registration) verification — out of scope. Registration is expected to
   happen out-of-band: capture the credential's public key (SPKI) once and hand it to this
-  library as an expectation.
+  library as an expectation (see [Registration](#registration)).
+- ❌ Algorithms other than ES256 (e.g. EdDSA, RS256).
 
 ## Usage
 
@@ -80,6 +81,19 @@ secret store); `Challenge.apply` fails with an `IllegalArgumentException` otherw
 request can't be passed to `verify` by accident. If you issue and consume challenges with your
 own server-side store instead, wrap them with `Challenge.Validated.trusted(bytes)`.
 
+### Registration
+
+Only ES256 credentials on P-256 can be verified; any other public key makes `verify` fail.
+When creating credentials, restrict the algorithm so authenticators that also support others
+(e.g. YubiKey 5's Ed25519) don't pick one this library can't check:
+
+```js
+navigator.credentials.create({ publicKey: { pubKeyCredParams: [{ type: "public-key", alg: -7 }], ... } })
+```
+
+Store the key as a DER SubjectPublicKeyInfo with an uncompressed point — what
+`AuthenticatorAttestationResponse.getPublicKey()` returns for ES256.
+
 ### User verification
 
 By default `verify` requires the authenticator's **user-verified (UV)** flag, not just
@@ -124,6 +138,10 @@ into the final binary, e.g. in your `project.scala` / build:
 ```
 
 libcrypto must be available at link time (it usually already is via OpenSSL).
+
+Because Native links the system libcrypto rather than bundling one, signature verification is
+only as up to date as the OpenSSL installed where you build and run — keep it patched alongside
+your other OS packages. (On the JVM, the JDK's own crypto provider is used.)
 
 ## Dependencies
 
