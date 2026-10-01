@@ -46,13 +46,13 @@ object AssertionVerifier {
   )
 
   /** Raw assertion fields as received from the browser (already base64url-decoded into bytes;
-    * `challenge` is the server-issued value we handed out).
+    * `challenge` is the server-issued value we handed out, as returned by [[Challenge.validate]]).
     */
   final case class Assertion(
     authenticatorData: ByteVector,
     clientDataJson: ByteVector,
     signature: ByteVector,
-    challenge: ByteVector,
+    challenge: Challenge.Validated,
   )
 
   /** @return
@@ -64,7 +64,7 @@ object AssertionVerifier {
       clientData <- ClientData.parse(assertion.clientDataJson.toArray)
       _ <- check(clientData.`type` == "webauthn.get", s"unexpected type: ${clientData.`type`}")
       _ <- check(clientData.origin == expected.origin, s"origin mismatch: ${clientData.origin}")
-      challengeB64 = base64UrlNoPad(assertion.challenge)
+      challengeB64 = base64UrlNoPad(assertion.challenge.bytes)
       _ <- check(
         constantTimeEquals(clientData.challenge, challengeB64),
         "challenge mismatch",

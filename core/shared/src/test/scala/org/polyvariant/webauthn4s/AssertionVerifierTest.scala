@@ -70,7 +70,8 @@ class AssertionVerifierTest extends munit.FunSuite {
       "MEQCIDMTFAKgJsWsNj83NHfco0QBedpzJwwkUW+nUg5rqIwnAiACbLRQ+fbPzPS/I1tJO40p8l85eAmmc/cwTsNk3VLvtQ=="
     )
 
-  private val challenge: ByteVector = hex"0102030405060708090a0b0c0d0e0f10"
+  private val challenge: Challenge.Validated =
+    Challenge.Validated(hex"0102030405060708090a0b0c0d0e0f10")
 
   private val expected: Expectations =
     Expectations(rpId = "signal.example", origin = "https://signal.example", publicKeySpki = spki)
@@ -111,7 +112,10 @@ class AssertionVerifierTest extends munit.FunSuite {
 
   test("rejects a wrong challenge") {
     assertEquals(
-      AssertionVerifier.verify(expected, assertion.copy(challenge = hex"00" ++ challenge.tail)),
+      AssertionVerifier.verify(
+        expected,
+        assertion.copy(challenge = Challenge.Validated(hex"00" ++ challenge.bytes.tail)),
+      ),
       Left("challenge mismatch"),
     )
   }

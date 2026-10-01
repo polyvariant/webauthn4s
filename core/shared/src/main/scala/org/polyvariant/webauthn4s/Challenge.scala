@@ -44,10 +44,10 @@ trait Challenge[F[_]] {
     * challenge via the [[ReplayGuard]] so the same token can't be validated twice.
     *
     * @return
-    *   the raw challenge bytes (for the assertion check) on success, else a `Left` naming the
-    *   failure.
+    *   the validated challenge (for [[AssertionVerifier.Assertion]]) on success, else a `Left`
+    *   naming the failure.
     */
-  def validate(token: Challenge.Token, now: FiniteDuration): F[Either[String, ByteVector]]
+  def validate(token: Challenge.Token, now: FiniteDuration): F[Either[String, Challenge.Validated]]
 
 }
 
@@ -57,6 +57,23 @@ object Challenge {
     * encodings match what a JSON API typically carries. `exp` is time since the epoch.
     */
   final case class Token(challenge: String, exp: FiniteDuration, mac: String)
+
+  /** Challenge bytes that passed [[Challenge.validate]] — the only form
+    * [[AssertionVerifier.Assertion]] accepts, so a challenge echoed by the client (e.g. lifted from
+    * its own `clientDataJSON`) can't be passed to `verify` by mistake, which would make the
+    * challenge check vacuous.
+    */
+  final case class Validated private[webauthn4s] (bytes: ByteVector)
+
+  object Validated {
+
+    /** Escape hatch for challenges issued and consumed by your own mechanism (e.g. a server-side
+      * store) instead of [[Challenge]]. Only wrap bytes that came from your server's own state —
+      * never bytes taken from the request.
+      */
+    def trusted(bytes: ByteVector): Validated = new Validated(bytes)
+
+  }
 
   /** Build a [[Challenge]] over a fixed secret and TTL, using an ambient `SecureRandom[F]` as the
     * source of challenge bytes and an ambient [[ReplayGuard]] to enforce single use.
@@ -95,7 +112,7 @@ object Challenge {
           macBytes <- Hmac.sha256(secret, macMessage(raw, exp))
         } yield Token(challenge = b64(raw), exp = exp, mac = b64(macBytes))
 
-      def validate(token: Token, now: FiniteDuration): F[Either[String, ByteVector]] =
+      def validate(token: Token, now: FiniteDuration): F[Either[String, Validated]] =
         ByteVector.fromBase64(token.challenge, Alphabet) match {
           case None => Left("challenge not base64url").pure[F].widen
           case Some(raw) if raw.size != ChallengeLength =>
@@ -112,7 +129,7 @@ object Challenge {
                   else
                     ReplayGuard[F].claim(raw, token.exp, now).map { fresh =>
                       if (fresh)
-                        Right(raw)
+                        Right(Validated(raw))
                       else
                         Left("challenge already used")
                     }

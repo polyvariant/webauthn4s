@@ -43,7 +43,7 @@ class ChallengeTest extends munit.CatsEffectSuite {
       token <- c.issue(now)
       result <- c.validate(token, now + 1.second)
       raw = ByteVector.fromValidBase64(token.challenge, scodec.bits.Bases.Alphabets.Base64UrlNoPad)
-    } yield assertEquals(result, Right(raw))
+    } yield assertEquals(result.map(_.bytes), Right(raw))
   }
 
   test("refuses a secret shorter than 32 bytes") {

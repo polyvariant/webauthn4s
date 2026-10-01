@@ -41,7 +41,7 @@ val assertion = Assertion(
   authenticatorData = /* bytes from the browser */,
   clientDataJson    = /* bytes from the browser */,
   signature         = /* bytes from the browser */,
-  challenge         = /* the raw challenge bytes you issued */,
+  challenge         = /* the Challenge.Validated returned by challenge.validate(token, now) */,
 )
 
 AssertionVerifier.verify(expected, assertion) match {
@@ -69,12 +69,16 @@ for {
   now                    <- IO.realTime                             // FiniteDuration since epoch
   token                  <- challenge.issue(now)                    // hand `token` to the client
   // ...later, on verify:
-  raw                    <- challenge.validate(token, now)          // Either[String, ByteVector]
-} yield raw
+  validated              <- challenge.validate(token, now)          // Either[String, Challenge.Validated]
+} yield validated
 ```
 
 `secret` must be at least 32 random bytes (e.g. `openssl rand -base64 32`, loaded from your
 secret store); `Challenge.apply` fails with an `IllegalArgumentException` otherwise.
+
+`Assertion.challenge` only accepts a `Challenge.Validated`, so a challenge taken from the
+request can't be passed to `verify` by accident. If you issue and consume challenges with your
+own server-side store instead, wrap them with `Challenge.Validated.trusted(bytes)`.
 
 ### User verification
 
