@@ -33,6 +33,7 @@ class ChallengeTest extends munit.CatsEffectSuite {
   private def challenge(secret: ByteVector = defaultSecret): IO[Challenge[IO]] =
     for {
       given SecureRandom[IO] <- SecureRandom.javaSecuritySecureRandom[IO]
+      given ReplayGuard[IO] <- ReplayGuard.inMemory[IO]
     } yield Challenge[IO](secret, ttl)
 
   test("issue then validate round-trips, returning the raw challenge bytes") {
@@ -67,6 +68,37 @@ class ChallengeTest extends munit.CatsEffectSuite {
       token <- c.issue(now)
       result <- c.validate(token, token.exp)
     } yield assertEquals(result, Left("challenge expired"))
+  }
+
+  test("rejects a replayed token") {
+    for {
+      c <- challenge()
+      token <- c.issue(now)
+      first <- c.validate(token, now + 1.second)
+      second <- c.validate(token, now + 2.seconds)
+    } yield {
+      assert(first.isRight)
+      assertEquals(second, Left("challenge already used"))
+    }
+  }
+
+  test("a token rejected for a bad mac is not consumed") {
+    for {
+      c <- challenge()
+      token <- c.issue(now)
+      _ <- c.validate(token.copy(mac = flipLastB64(token.mac)), now + 1.second)
+      result <- c.validate(token, now + 1.second)
+    } yield assert(result.isRight)
+  }
+
+  test("in-memory guard forgets challenges once they expire") {
+    for {
+      guard <- ReplayGuard.inMemory[IO]
+      c = ByteVector(1, 2, 3)
+      first <- guard.claim(c, now + ttl, now)
+      again <- guard.claim(c, now + ttl, now + 1.second)
+      afterExpiry <- guard.claim(c, now + 2 * ttl, now + ttl)
+    } yield assertEquals((first, again, afterExpiry), (true, false, true))
   }
 
   /** Flip a bit in the last byte of a base64url value, preserving validity. */

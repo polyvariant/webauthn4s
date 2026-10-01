@@ -28,8 +28,8 @@ import scala.concurrent.duration.FiniteDuration
   *
   * No server-side challenge store: an issued token is `challenge ‖ exp` plus an HMAC binding them
   * under a session secret. Anyone can read the challenge, but only the holder of `secret` can forge
-  * a valid `mac`, and `exp` bounds replay. This survives serverless container churn for free —
-  * there's nothing to persist.
+  * a valid `mac`, and `exp` bounds its lifetime. Single use within that lifetime is enforced by the
+  * ambient [[ReplayGuard]] — the only state involved, and bounded by issue rate × TTL.
   *
   * Construct one with [[Challenge.apply]] and pass it around, rather than threading the secret,
   * random source, and TTL through call sites. The caller still supplies each `now` reading (time
@@ -40,7 +40,8 @@ trait Challenge[F[_]] {
   /** Issue a fresh challenge valid until `now + ttl`. Hand the returned token to the client. */
   def issue(now: FiniteDuration): F[Challenge.Token]
 
-  /** Recompute the mac, constant-time compare it, and check expiry against `now`.
+  /** Recompute the mac, constant-time compare it, check expiry against `now`, and consume the
+    * challenge via the [[ReplayGuard]] so the same token can't be validated twice.
     *
     * @return
     *   the raw challenge bytes (for the assertion check) on success, else a `Left` naming the
@@ -58,7 +59,7 @@ object Challenge {
   final case class Token(challenge: String, exp: FiniteDuration, mac: String)
 
   /** Build a [[Challenge]] over a fixed secret and TTL, using an ambient `SecureRandom[F]` as the
-    * source of challenge bytes.
+    * source of challenge bytes and an ambient [[ReplayGuard]] to enforce single use.
     *
     * @param secret
     *   the HMAC key; only its holder can forge a valid token.
@@ -66,7 +67,7 @@ object Challenge {
     *   how long the browser has to complete `navigator.credentials.get()` and round-trip to the
     *   verify endpoint.
     */
-  def apply[F[_]: Hashing: MonadCancelThrow: SecureRandom](
+  def apply[F[_]: Hashing: MonadCancelThrow: SecureRandom: ReplayGuard](
     secret: ByteVector,
     ttl: FiniteDuration,
   ): Challenge[F] =
@@ -86,13 +87,18 @@ object Challenge {
             ByteVector.fromBase64(token.mac, Alphabet) match {
               case None               => Left("mac not base64url").pure[F].widen
               case Some(presentedMac) =>
-                Hmac.sha256(secret, macMessage(raw, token.exp)).map { expectedMac =>
+                Hmac.sha256(secret, macMessage(raw, token.exp)).flatMap { expectedMac =>
                   if (!Hmac.constantTimeEquals(expectedMac, presentedMac))
-                    Left("challenge mac mismatch")
+                    Left("challenge mac mismatch").pure[F].widen
                   else if (now >= token.exp)
-                    Left("challenge expired")
+                    Left("challenge expired").pure[F].widen
                   else
-                    Right(raw)
+                    ReplayGuard[F].claim(raw, token.exp, now).map { fresh =>
+                      if (fresh)
+                        Right(raw)
+                      else
+                        Left("challenge already used")
+                    }
                 }
             }
         }

@@ -8,14 +8,14 @@ relying-party context, it tells you whether the assertion is valid. It's pure an
 inputs in, `Either[String, Unit]` out, never throws. The only platform-specific piece is the
 ES256 signature check, which uses JCA on the JVM and OpenSSL (via FFI) on Native.
 
-It also ships a **stateless HMAC challenge** helper so you don't need a server-side challenge
-store.
+It also ships an **HMAC challenge** helper: tokens are self-validating, so the only server-side
+state is a short-lived set of already-used challenges (see [Replay protection](#replay-protection)).
 
 ## Scope
 
 - ✅ Assertion (authentication) verification: origin, rpId hash, user-present flag,
   challenge match, ES256 signature.
-- ✅ Stateless challenge issue/validate (HMAC-SHA256, TTL-bounded, no storage).
+- ✅ Challenge issue/validate (HMAC-SHA256, TTL-bounded, single-use via a pluggable `ReplayGuard`).
 - ❌ Attestation (registration) verification — out of scope. Registration is expected to
   happen out-of-band: capture the credential's public key (SPKI) once and hand it to this
   library as an expectation.
@@ -50,8 +50,8 @@ AssertionVerifier.verify(expected, assertion) match {
 }
 ```
 
-Stateless challenges. The library is `F[_]`-polymorphic: you build a `Challenge[F]` over a
-fixed secret and TTL (with an ambient `SecureRandom[F]`), then pass it around. You supply the
+Challenges. The library is `F[_]`-polymorphic: you build a `Challenge[F]` over a fixed secret
+and TTL (with an ambient `SecureRandom[F]` and `ReplayGuard[F]`), then pass it around. You supply the
 current time (as a `FiniteDuration` since the epoch) per call, so it stays referentially
 transparent.
 
@@ -59,10 +59,12 @@ transparent.
 import cats.effect.IO
 import cats.effect.std.SecureRandom
 import org.polyvariant.webauthn4s.Challenge
+import org.polyvariant.webauthn4s.ReplayGuard
 import scala.concurrent.duration.*
 
 for {
   given SecureRandom[IO] <- SecureRandom.javaSecuritySecureRandom[IO]
+  given ReplayGuard[IO]  <- ReplayGuard.inMemory[IO]  // single process only, see below
   challenge = Challenge[IO](secret, ttl = 60.seconds)  // hold & pass this around
   now      <- IO.realTime                              // FiniteDuration since epoch
   token    <- challenge.issue(now)                     // hand `token` to the client
@@ -70,6 +72,19 @@ for {
   raw      <- challenge.validate(token, now)            // Either[String, ByteVector]
 } yield raw
 ```
+
+### Replay protection
+
+An HMAC token is valid until its `exp`, so on its own nothing stops the same token — together
+with an assertion signed over it — from being submitted twice. `Challenge.validate` therefore
+consumes each challenge through a `ReplayGuard[F]`, and rejects a second use with
+`"challenge already used"`.
+
+- `ReplayGuard.inMemory` is enough when every verify request reaches the same process.
+- With several instances (or serverless), implement `ReplayGuard` over a shared store — e.g.
+  Redis `SET challenge 1 NX PXAT exp`, or an insert into a table with a unique key. Entries can
+  be dropped after `exp`, since the token itself is rejected from then on.
+- `ReplayGuard.disabled` turns the check off. Only use it if you accept replay within the TTL.
 
 ## Scala Native linking
 
