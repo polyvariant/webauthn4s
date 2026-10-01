@@ -70,6 +70,24 @@ class ChallengeTest extends munit.CatsEffectSuite {
     } yield assertEquals(result, Left("challenge expired"))
   }
 
+  test("rejects a token whose challenge isn't the issued length") {
+    for {
+      c <- challenge()
+      token <- c.issue(now)
+      raw = ByteVector.fromValidBase64(token.challenge, scodec.bits.Bases.Alphabets.Base64UrlNoPad)
+      short = token.copy(challenge = raw.init.toBase64(scodec.bits.Bases.Alphabets.Base64UrlNoPad))
+      result <- c.validate(short, now + 1.second)
+    } yield assertEquals(result, Left("challenge has wrong length"))
+  }
+
+  test("rejects a token whose exp was changed") {
+    for {
+      c <- challenge()
+      token <- c.issue(now)
+      result <- c.validate(token.copy(exp = token.exp + 1.hour), now + 1.second)
+    } yield assertEquals(result, Left("challenge mac mismatch"))
+  }
+
   test("rejects a replayed token") {
     for {
       c <- challenge()

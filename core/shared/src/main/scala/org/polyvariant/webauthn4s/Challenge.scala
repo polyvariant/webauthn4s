@@ -75,14 +75,16 @@ object Challenge {
 
       def issue(now: FiniteDuration): F[Token] =
         for {
-          raw <- SecureRandom[F].nextBytes(32).map(ByteVector(_))
+          raw <- SecureRandom[F].nextBytes(ChallengeLength).map(ByteVector(_))
           exp = now + ttl
           macBytes <- Hmac.sha256(secret, macMessage(raw, exp))
         } yield Token(challenge = b64(raw), exp = exp, mac = b64(macBytes))
 
       def validate(token: Token, now: FiniteDuration): F[Either[String, ByteVector]] =
         ByteVector.fromBase64(token.challenge, Alphabet) match {
-          case None      => Left("challenge not base64url").pure[F].widen
+          case None => Left("challenge not base64url").pure[F].widen
+          case Some(raw) if raw.size != ChallengeLength =>
+            Left("challenge has wrong length").pure[F].widen
           case Some(raw) =>
             ByteVector.fromBase64(token.mac, Alphabet) match {
               case None               => Left("mac not base64url").pure[F].widen
@@ -107,11 +109,20 @@ object Challenge {
 
   private val Alphabet = scodec.bits.Bases.Alphabets.Base64UrlNoPad
 
-  /** Bytes the mac is computed over: `challenge ‖ ascii(expMillis)`. Encoding `exp` as its decimal
-    * ASCII milliseconds keeps issue/validate trivially in sync.
+  /** Size of an issued challenge; `validate` rejects anything else. */
+  private val ChallengeLength: Int = 32
+
+  /** Domain separation, so a mac over this layout can't be confused with any other use of the same
+    * secret. Bump the version if the layout ever changes.
+    */
+  private val MacDomain: ByteVector = ByteVector("webauthn4s/challenge/v1".getBytes("UTF-8"))
+
+  /** Bytes the mac is computed over: `domain ‖ challenge(32) ‖ int64be(expMillis)`. Every field is
+    * fixed-length, so no two distinct (challenge, exp) pairs share an encoding — a variable-length
+    * layout would let bytes shift between the challenge and `exp` under the same mac.
     */
   private def macMessage(challenge: ByteVector, exp: FiniteDuration): ByteVector =
-    challenge ++ ByteVector(exp.toMillis.toString.getBytes("UTF-8"))
+    MacDomain ++ challenge ++ ByteVector.fromLong(exp.toMillis)
 
   private def b64(bytes: ByteVector): String =
     bytes.toBase64(Alphabet)
