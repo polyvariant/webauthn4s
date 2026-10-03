@@ -36,7 +36,7 @@ val commonSettings = Seq(
     "org.scodec" %%% "scodec-core" % "2.3.3",
     "com.github.plokhotnyuk.jsoniter-scala" %%% "jsoniter-scala-core" % "2.38.17",
     "org.typelevel" %%% "cats-effect-std" % "3.7.0",
-    "co.fs2" %%% "fs2-core" % "3.13.0",
+    "co.fs2" %%% "fs2-core" % "3.14.0",
     "org.scalameta" %%% "munit" % "1.2.0" % Test,
     "org.typelevel" %%% "munit-cats-effect" % "2.2.0" % Test,
   ),
