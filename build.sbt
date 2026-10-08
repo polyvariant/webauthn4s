@@ -37,7 +37,7 @@ val commonSettings = Seq(
     "com.github.plokhotnyuk.jsoniter-scala" %%% "jsoniter-scala-core" % "2.41.2",
     "org.typelevel" %%% "cats-effect-std" % "3.7.0",
     "co.fs2" %%% "fs2-core" % "3.14.0",
-    "org.scalameta" %%% "munit" % "1.2.4" % Test,
+    "org.scalameta" %%% "munit" % "1.3.6" % Test,
     "org.typelevel" %%% "munit-cats-effect" % "2.2.1" % Test,
   ),
 )
