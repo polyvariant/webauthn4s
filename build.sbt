@@ -34,7 +34,7 @@ val commonSettings = Seq(
   ),
   libraryDependencies ++= Seq(
     "org.scodec" %%% "scodec-core" % "2.3.3",
-    "com.github.plokhotnyuk.jsoniter-scala" %%% "jsoniter-scala-core" % "2.41.6",
+    "com.github.plokhotnyuk.jsoniter-scala" %%% "jsoniter-scala-core" % "2.41.7",
     "org.typelevel" %%% "cats-effect-std" % "3.7.1",
     "co.fs2" %%% "fs2-core" % "3.14.0",
     "org.scalameta" %%% "munit" % "1.3.6" % Test,
